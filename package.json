@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@chakra-ui/icons": "^2.1.1",
+    "@chakra-ui/react": "^2.8.2",
+    "chakra": "^0.0.3",
+    "node": "^21.2.0",
+    "npm": "^10.2.5"
+  }
+}
