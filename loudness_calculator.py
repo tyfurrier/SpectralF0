@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import List, Tuple, Callable, Dict
 import librosa
+import math
 # citation: https://www.dsprelated.com/showcode/174.php
 
 class FScale(Enum):
@@ -14,13 +15,15 @@ class FScale(Enum):
             FScale.MIDI: librosa.midi_to_hz,
             FScale.HZ: lambda x: x
         }
-        return to_hz_function[self](value)
+        return to_hz_function[self]([value])[0]
 
     def to_mel(self, value: float):
-        return librosa.hz_to_mel(self.to_hz(value=value))
+        hz = self.to_hz(value=value)
+        return librosa.hz_to_mel([hz])[0]
 
     def to_midi(self, value: float):
-        return librosa.hz_to_midi(self.to_hz(value=value))
+        hz = self.to_hz(value=value)
+        return librosa.hz_to_midi([hz])[0]
 
 
 
@@ -71,20 +74,33 @@ ISO226_2023 = {
 
 def hearing_threshold(f: float):
     """ Returns the hearing threshold in SPLdB at a given frequency"""
-    frequency_ends = _binary_search_boundaries(FREQUENCIES_FROM_ISO_226, f)
+    return _get_iso_value_for_f(f_hz=f, value="Tf")
 
-    else:
-        raise NotImplementedError
+def estimate_af(f: float):
+    scale = FScale.HZ if f >= 4000 else FScale.MIDI
+    return _get_iso_value_for_f(f_hz=f,
+                         value="af",
+                         scale=scale)
 
-def _get_iso_value_for_f(f: float, value: str,
+
+def _get_iso_value_for_f(f_hz: float, value: str,
                          scale: FScale = FScale.MEL) -> float:
     """ Returns the inferred value (through interpolation) of a given key for a given
     frequency in the ISO 226-2023 table"""
-    frequency_ends = _binary_search_boundaries(FREQUENCIES_FROM_ISO_226, f)
+    frequency_ends = _binary_search_boundaries(FREQUENCIES_FROM_ISO_226, f_hz)
     if frequency_ends[0] == frequency_ends[1]:
         return ISO226_2023[frequency_ends[0]][value]
-    bottom_in_mel = frequency_ends[0]
-    return ISO226_2023[frequency_ends[0]][value]
+    bottom_f = convert_pitch_unit(pitch=frequency_ends[0], from_scale=FScale.HZ, to_scale=scale)
+    top_f = convert_pitch_unit(pitch=frequency_ends[1], from_scale=FScale.HZ, to_scale=scale)
+    target_f = convert_pitch_unit(pitch=f_hz, from_scale=FScale.HZ, to_scale=scale)
+    top_val = ISO226_2023[frequency_ends[1]][value]
+    bottom_val = ISO226_2023[frequency_ends[0]][value]
+
+    # linearly interpolate the target using the scaled values (y = mx + b)
+    m = (top_val - bottom_val)/(top_f - bottom_f)
+    interpolated_value = m * (target_f - bottom_f) + bottom_val
+    return interpolated_value
+
 def _binary_search_boundaries(values: List[float], target: float) -> Tuple[float, float]:
     """ Returns the two values in an ordered list that encapsulate (min and max of)
     the given target. If the given target is in the list, it will return that value.
@@ -102,34 +118,36 @@ def _binary_search_boundaries(values: List[float], target: float) -> Tuple[float
 
 
 def db_from_phon(f: float, phon: float):
-    f = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
-         1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500]
-
-    af = [0.532, 0.506, 0.480, 0.455, 0.432, 0.409, 0.387, 0.367, 0.349, 0.330, 0.315,
-          0.301, 0.288, 0.276, 0.267, 0.259, 0.253, 0.250, 0.246, 0.244, 0.243, 0.243,
-          0.243, 0.242, 0.242, 0.245, 0.254, 0.271, 0.301]
-
-    Lu = [-31.6, -27.2, - 23.0 -19.1 -15.9 -13.0 -10.3 -8.1 -6.2 -4.5 -3.1,
-          -2.0 -1.1 -0.4, 0.0, 0.3, 0.5, 0.0 -2.7 -4.1 -1.0, 1.7,
-          2.5, 1.2 -2.1 -7.1 -11.2 -10.7 -3.1]
-
-    Tf = [78.5, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4,
-          11.4, 8.6, 6.2, 4.4, 3.0, 2.2, 2.4, 3.5, 1.7 -1.3 -4.2,
-          -6.0 -5.4 -1.5, 6.0, 12.6, 13.9, 12.3]
-
-    t_f = hearing_threshold(
-        f)  # threshold of hearing in dB at frequency f based on ISO 226:2023
+    t_f = hearing_threshold(f)  # threshold of hearing in dB at frequency f based on ISO 226:2023
     t_r = hearing_threshold(1000)  # threshold of hearing in dB at 1000 Hz based on ISO 226:2023
-    a_f = 0  # exponent for loudness perception at frequency f based on ISO 226:2023
+    a_f = estimate_af(f=f)  # exponent for loudness perception at frequency f based on ISO 226:2023
     a_r = 0.3  # exponent for loudness perception at 1000 Hz (reference) based on ISO 226:2023
-    l_u = 0  # magnitude of linear transfer function normalized at 1000 Hz in dB
+    # magnitude of linear transfer function normalized at 1000 Hz in dB
+    l_u = _get_iso_value_for_f(f_hz=f,
+                               value="Lu",
+                               scale=FScale.HZ)
     # p_0 = 20e-6  # reference sound pressure in Pa
     # p_a = 0  # absolute sound pressure
-    db_of_f_at_phon = (10 / a_f) * math.log10(
-        (4e-10 ** 2) ** (a_r - a_f)
-        * (10 ** (a_r * phon / 10) - 10 ** (a_r * t_r / 10))
-        + 10 ** (a_f * (t_f + l_u / 10))
+    static = (a_r * t_r / 10)
+    part_1 = (10 / a_f) # 30.9
+    part_2 = 4e-10 ** (a_r - a_f)  # 1.6449
+    part_3_1 = 10 ** (a_r * phon / 10) #  63.09
+    part_3_2 = 10 ** static  # 1.18
+    part_4 = 10 ** 0.0969
+    part_4 = 10 ** (a_f * (t_f + l_u) / 10)  # 1.2499
+    A_f = (part_2) \
+          * (
+                  part_3_1 - part_3_2
+          ) \
+          + (part_4)
+    db_of_f_at_phon = part_1 * math.log10(
+        A_f
     ) - l_u
+    return db_of_f_at_phon
+
+def amplitude_from_db(db: float):
+    """ Returns the amplitude ratio for an increase/decrease in the given db value"""
+    return 10 ** (db / 20)
 
 
 def centroid_shift(scale: FScale, scale1: List[float], scale2: List[float]):
