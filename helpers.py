@@ -5,6 +5,13 @@ from typing import Optional
 import os
 import shutil
 
+def _project_root_folder_path():
+    """ Returns the path to the project root folder"""
+    return os.path.join(os.path.dirname(__file__))
+
+def _created_samples_folder_path():
+    """ Returns the path to the created_samples folder"""
+    return os.path.join(os.path.dirname(__file__), "created_samples")
 
 def _custom_write(path: str,
                   wave: np.ndarray,
@@ -25,7 +32,7 @@ def _custom_write(path: str,
 
 
 def _prep_directory(folder_path: Optional[str],
-                    default_path: str,
+                    default_path: str = None,
                     clear_dir: bool = True,
                     ):
     """ Creates a directory at folder_path if it doesn't exist and clears it if clear_dir is True"""
@@ -36,4 +43,4 @@ def _prep_directory(folder_path: Optional[str],
             shutil.rmtree(folder_path)
             os.mkdir(folder_path)
     else:
-        os.mkdir(folder_path)
+        os.makedirs(folder_path, exist_ok=True)

@@ -105,7 +105,7 @@ def _binary_search_boundaries(values: List[float], target: float) -> Tuple[float
     """ Returns the two values in an ordered list that encapsulate (min and max of)
     the given target. If the given target is in the list, it will return that value.
     """
-    bottom, top = 0, len(values)
+    bottom, top = 0, len(values) - 1
     while top - bottom > 1:
         mid = (top + bottom) // 2
         if values[mid] < target:

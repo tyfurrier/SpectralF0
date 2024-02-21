@@ -1,10 +1,13 @@
-from interface import pure_tone_synthesizer, scale_numpy_wave
+from interface import scale_numpy_wave
 import loudness_calculator as lc
 import numpy as np
-from helpers import _prep_directory, _custom_write
+from helpers import _prep_directory, _custom_write, _created_samples_folder_path
 import os
 from typing import Tuple, List
+from src.custom_errors import ClippingError
 import pandas as pd
+import logging
+
 
 def pure_tone_synthesizer(fundamental: int,
                           harmonic_decibels: list = None,
@@ -27,9 +30,10 @@ def pure_tone_synthesizer(fundamental: int,
         bitrate (int)
         length (float) The number of seconds to generate
         amplitude_of_80dB_SPL (float): See docstring
-        custom_minmax (tuple)
+        normalize (bool): If True, the wave will be scaled to fit the range of -1 to 1
+          custom_minmax (tuple): If Normalize is True, this will be passed to scale_numpy_wave
         """
-    max_db = 0.5  # amplitude for 80dB pure tone, so we can combine four without clipping
+    max_db = 0.3  # amplitude for 80dB pure tone, so we can combine four without clipping
     if amplitude_of_80dB_SPL is not None:
         max_db = amplitude_of_80dB_SPL
     if harmonic_decibels is None:
@@ -54,26 +58,36 @@ def pure_tone_synthesizer(fundamental: int,
     if normalize:
         return scale_numpy_wave(wave=full_second, plot=plot, minmax=custom_minmax), bitrate
     else:
+        for bit in full_second:
+            if abs(bit) > 1:
+                raise ClippingError(f"Clipping detected: {bit}\n"
+                                    f"Set `normalize` to True or reduce the cummulative amplitude"
+                                    f"Arguments: {locals()}")
         return full_second, bitrate
+
 
 def create_test_tone(hz: float):
     wave, sr = pure_tone_synthesizer(fundamental=hz,
                                      harmonic_decibels=[lc.hearing_threshold(f=hz)],
                                      length=2)
-    folder_path = os.path.join(__file__, os.pardir, "created_samples")
+    folder_path = _created_samples_folder_path()
     _prep_directory(folder_path=folder_path,
                     default_path=folder_path,
                     clear_dir=False)
     _custom_write(path=os.path.join(folder_path, f"test_tone_{hz}.wav"), sr=sr, wave=wave,
                   overwrite=True)
 
-def create_max_pairs(phon_levels: list = None):
+
+def create_tone_pairs(phon_levels: list = None):
     if phon_levels is None:
-        phon_levels = [30, 40, 50, 60]
+        phon_levels = [5, 10, 15, 20, 30, 40, 50, 60, 70]
     # read jake_pairs.csv into a pandas dataframe
-    jake_pairs: pd.DataFrame = pd.read_csv("jake_pairs.csv")
-    output_folder_path = os.path.join(__file__, os.pardir, "created_samples", "first_max_pairs")
+    jake_pairs: pd.DataFrame = pd.read_csv("all_pairs.csv")
+    output_folder_path = os.path.join(_created_samples_folder_path(), "tone_pairs_max_plus_jake")
     for i, row in jake_pairs.iterrows():
+        pair_folder = os.path.join(output_folder_path, f'Pair {round(row["PAIR"])}')
+        _prep_directory(folder_path=pair_folder,
+                        clear_dir=True)
         for phon in phon_levels:
             sounds_in_combination: List[Tuple[np.ndarray, int]] = []
             for part in ["f1", "f2"]:
@@ -81,26 +95,62 @@ def create_max_pairs(phon_levels: list = None):
                 decibel_list = [None for _ in range(max_harmonic)]
                 decibel_list[0] = lc.db_from_phon(f=row[part],
                                                   phon=phon)
+                logging.info(f'Creating pair {row["PAIR"]} at {decibel_list[0]} for {phon} phon at {row[part]}')
                 for h in ["h1", "h2", "h3"]:
                     harmonic = int(row[f"{part} {h}"])
                     hz_of_harmonic = row[part] * harmonic
                     decibel_list[harmonic - 1] = lc.db_from_phon(f=hz_of_harmonic,
                                                                  phon=phon)
+                    logging.info(f'{row["PAIR"]} PAIR: \n'
+                                 f'{harmonic}th harmonic at {decibel_list[harmonic - 1]} dB for '
+                                 f'{phon} phon at {row[part] * harmonic}')
                 wave, sr = pure_tone_synthesizer(fundamental=row[part],
                                                  harmonic_decibels=decibel_list,
                                                  length=1)
                 sounds_in_combination.append((wave, sr))
-            np.append(sounds_in_combination[0][0],
-                      np.append(np.zeros(sr // 2), sounds_in_combination[1][0]))
-            pair_folder = os.path.join(output_folder_path, row["Pair #"])
-            _prep_directory(default_path=pair_folder,
-                            clear_dir=True)
-            _custom_write(path=os.path.join(__file__, os.pardir, "created_samples",
-                                           f"{row['f1']}_{row['f2']}_{phon}phon.wav"),
-                          wave=sounds_in_combination[0][0],
+            appended_pair: np.ndarray = np.append(sounds_in_combination[0][0],
+                                                  np.append(np.zeros(sr // 2).astype(np.float32),
+                                                            sounds_in_combination[1][0]))
+            _custom_write(path=os.path.join(pair_folder, f"{phon}_phon.wav"),
+                          wave=appended_pair,
                           sr=sr,
                           overwrite=True)
 
+def annotate_tone_pairs(phon_levels: list = None):
+
+    # read all_pairs.csv into a pandas dataframe
+    tone_pair_csv: pd.DataFrame = pd.read_csv("all_pairs.csv")
+    output_folder_path = _created_samples_folder_path()  # we will write a new one where we keep sounds
+    for i, row in tone_pair_csv.iterrows():
+        for part in ["f1", "f2"]:
+                # add column for mel, hz, and midi spectroid for each part
+                # add column for spectroid shift in mel, hz, and midi
+                # add column for spectroid shift when only considering harmonics
+                # add column for min and max inter-harmonic distance
+                # add column for fundamental distance in mel, hz, and midi
+                # add column for common frequency
+                # add column for distance from fundamental to common frequency in each scale mel hz midi
+                # add column for distance from fundamental to harmonics in each scale mel hz midi
+                max_harmonic = int(row[f"{part} h3"])
+                max_harmonic = int(row[f"{part} h3"])
+                decibel_list = [None for _ in range(max_harmonic)]
+                phon = 1
+                decibel_list[0] = lc.db_from_phon(f=row[part],
+                                                  phon=phon)
+                logging.info(
+                    f'Creating pair {row["PAIR"]} at {decibel_list[0]} for {phon} phon at {row[part]}')
+                for h in ["h1", "h2", "h3"]:
+                    harmonic = int(row[f"{part} {h}"])
+                    hz_of_harmonic = row[part] * harmonic
+                    decibel_list[harmonic - 1] = lc.db_from_phon(f=hz_of_harmonic,
+                                                                 phon=phon)
+                    logging.info(f'{row["PAIR"]} PAIR: \n'
+                                 f'{harmonic}th harmonic at {decibel_list[harmonic - 1]} dB for '
+                                 f'{phon} phon at {row[part] * harmonic}')
+
     
 if __name__ == "__main__":
-    create_test_tone(1000)
+    # create_test_tone(1000)
+    logging.basicConfig(level=logging.INFO)
+    create_tone_pairs(
+        phon_levels=[5, 10, 15, 20, 30, 40, 50, 60])
