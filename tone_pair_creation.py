@@ -114,7 +114,7 @@ def create_tone_pairs(phon_levels: list = None):
                                                      length=1,
                                                      clipping_tolerance=1)
                 except ClippingError as ce:
-                    logging. error(ce)
+                    logging. error(ce)  
                     break
                 sounds_in_combination.append((wave, sr))
             else:
