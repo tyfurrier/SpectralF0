@@ -16,7 +16,8 @@ def pure_tone_synthesizer(fundamental: int,
                           length: int = 1,
                           normalize: bool = False,
                           amplitude_of_80dB_SPL: float = None,
-                          custom_minmax: tuple = None) -> Tuple[np.ndarray, int]:
+                          custom_minmax: tuple = None,
+                          clipping_tolerance: int = 2) -> Tuple[np.ndarray, int]:
     """ Returns one second of the fundamental and its harmonics at the given decibel SPL levels. The SPL is
     calculated from an amplitude of 0.5 equating to an SPL of 80dB, the amplitude required to reach 80dB can be
     changed by setting the amplitude_of_80dB_SPL parameter.
@@ -32,8 +33,11 @@ def pure_tone_synthesizer(fundamental: int,
         amplitude_of_80dB_SPL (float): See docstring
         normalize (bool): If True, the wave will be scaled to fit the range of -1 to 1
           custom_minmax (tuple): If Normalize is True, this will be passed to scale_numpy_wave
+        clipping_tolerance (int): The number of digits to round each bit before checking for clipping. For example, if
+        a sound reaches an amplitude of 1.001 and `normalize` is set to False, then a ClippingError will be raised if
+        `clipping_tolerance` is set to 3 or greater and no error will be raised if `clipping_tolerance` is 2.
         """
-    max_db = 0.3  # amplitude for 80dB pure tone, so we can combine four without clipping
+    max_db = 0.25  # amplitude for 80dB pure tone, so we can combine four without clipping
     if amplitude_of_80dB_SPL is not None:
         max_db = amplitude_of_80dB_SPL
     if harmonic_decibels is None:
@@ -59,7 +63,7 @@ def pure_tone_synthesizer(fundamental: int,
         return scale_numpy_wave(wave=full_second, plot=plot, minmax=custom_minmax), bitrate
     else:
         for bit in full_second:
-            if abs(bit) > 1:
+            if round(abs(bit), 2) > 1:
                 raise ClippingError(f"Clipping detected: {bit}\n"
                                     f"Set `normalize` to True or reduce the cummulative amplitude"
                                     f"Arguments: {locals()}")
@@ -104,17 +108,23 @@ def create_tone_pairs(phon_levels: list = None):
                     logging.info(f'{row["PAIR"]} PAIR: \n'
                                  f'{harmonic}th harmonic at {decibel_list[harmonic - 1]} dB for '
                                  f'{phon} phon at {row[part] * harmonic}')
-                wave, sr = pure_tone_synthesizer(fundamental=row[part],
-                                                 harmonic_decibels=decibel_list,
-                                                 length=1)
+                try:
+                    wave, sr = pure_tone_synthesizer(fundamental=row[part],
+                                                     harmonic_decibels=decibel_list,
+                                                     length=1,
+                                                     clipping_tolerance=1)
+                except ClippingError as ce:
+                    logging. error(ce)
+                    continue
                 sounds_in_combination.append((wave, sr))
-            appended_pair: np.ndarray = np.append(sounds_in_combination[0][0],
-                                                  np.append(np.zeros(sr // 2).astype(np.float32),
-                                                            sounds_in_combination[1][0]))
-            _custom_write(path=os.path.join(pair_folder, f"{phon}_phon.wav"),
-                          wave=appended_pair,
-                          sr=sr,
-                          overwrite=True)
+            else:
+                appended_pair: np.ndarray = np.append(sounds_in_combination[0][0],
+                                                      np.append(np.zeros(sr // 2).astype(np.float32),
+                                                                sounds_in_combination[1][0]))
+                _custom_write(path=os.path.join(pair_folder, f"{phon}_phon.wav"),
+                              wave=appended_pair,
+                              sr=sr,
+                              overwrite=True)
 
 def annotate_tone_pairs(phon_levels: list = None):
 
