@@ -115,7 +115,7 @@ def create_tone_pairs(phon_levels: list = None):
                                                      clipping_tolerance=1)
                 except ClippingError as ce:
                     logging. error(ce)
-                    continue
+                    break
                 sounds_in_combination.append((wave, sr))
             else:
                 appended_pair: np.ndarray = np.append(sounds_in_combination[0][0],
