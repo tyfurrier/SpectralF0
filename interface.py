@@ -1,6 +1,6 @@
 import logging
 import math
-import tkinter as tk
+# import tkinter as tk
 import uuid
 
 import matplotlib.pyplot

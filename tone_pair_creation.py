@@ -37,7 +37,7 @@ def pure_tone_synthesizer(fundamental: int,
         a sound reaches an amplitude of 1.001 and `normalize` is set to False, then a ClippingError will be raised if
         `clipping_tolerance` is set to 3 or greater and no error will be raised if `clipping_tolerance` is 2.
         """
-    max_db = 0.25  # amplitude for 80dB pure tone, so we can combine four without clipping
+    max_db = 0.7  # amplitude for 80dB pure tone, so we can combine four without clipping
     if amplitude_of_80dB_SPL is not None:
         max_db = amplitude_of_80dB_SPL
     if harmonic_decibels is None:
@@ -78,7 +78,7 @@ def create_test_tone(hz: float):
     _prep_directory(folder_path=folder_path,
                     default_path=folder_path,
                     clear_dir=False)
-    _custom_write(path=os.path.join(folder_path, f"test_tone_{hz}.wav"), sr=sr, wave=wave,
+    _custom_write(path=os.path.join(folder_path, f"test_tone_louder_{hz}.wav"), sr=sr, wave=wave,
                   overwrite=True)
 
 
@@ -87,11 +87,21 @@ def create_tone_pairs(phon_levels: list = None):
         phon_levels = [5, 10, 15, 20, 30, 40, 50, 60, 70]
     # read jake_pairs.csv into a pandas dataframe
     jake_pairs: pd.DataFrame = pd.read_csv("all_pairs.csv")
-    output_folder_path = os.path.join(_created_samples_folder_path(), "tone_pairs_max_plus_jake")
+    output_folder_path = os.path.join(_created_samples_folder_path(), "tone_pairs_pilot")
+    _prep_directory(folder_path=output_folder_path,
+                    clear_dir=True)
+    pair_filter = {1, 2, 3, 4, 6, 8, 22, 23, 24, 26}
     for i, row in jake_pairs.iterrows():
-        pair_folder = os.path.join(output_folder_path, f'Pair {round(row["PAIR"])}')
-        _prep_directory(folder_path=pair_folder,
-                        clear_dir=True)
+        pair_number = int(row["PAIR"])
+        if pair_number not in pair_filter:
+            continue
+        all_root = True
+        if not all_root:
+            pair_folder = os.path.join(output_folder_path, f'Pair {round(row["PAIR"])}')
+            _prep_directory(folder_path=pair_folder,
+                            clear_dir=True)
+        else:
+            pair_folder = output_folder_path
         for phon in phon_levels:
             sounds_in_combination: List[Tuple[np.ndarray, int]] = []
             for part in ["f1", "f2"]:
@@ -114,14 +124,14 @@ def create_tone_pairs(phon_levels: list = None):
                                                      length=1,
                                                      clipping_tolerance=1)
                 except ClippingError as ce:
-                    logging. error(ce)  
+                    logging.error(ce)
                     break
                 sounds_in_combination.append((wave, sr))
             else:
                 appended_pair: np.ndarray = np.append(sounds_in_combination[0][0],
                                                       np.append(np.zeros(sr // 2).astype(np.float32),
                                                                 sounds_in_combination[1][0]))
-                _custom_write(path=os.path.join(pair_folder, f"{phon}_phon.wav"),
+                _custom_write(path=os.path.join(pair_folder, f"{pair_number}_{phon}_phon.wav"),
                               wave=appended_pair,
                               sr=sr,
                               overwrite=True)
@@ -160,7 +170,7 @@ def annotate_tone_pairs(phon_levels: list = None):
 
     
 if __name__ == "__main__":
-    # create_test_tone(1000)
-    logging.basicConfig(level=logging.INFO)
+    create_test_tone(1000)
+    logging.basicConfig(level=logging.ERROR)
     create_tone_pairs(
-        phon_levels=[5, 10, 15, 20, 30, 40, 50, 60])
+        phon_levels=[10, 30, 50])
