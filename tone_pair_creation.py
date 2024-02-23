@@ -182,11 +182,11 @@ def create_herrings(phon_levels: List[float] = None,
         h_set = [1, 2, 3]  # used for pilot
     pairs_as_notes = [("A3", "D3"), ("A3", "Bb3")]
     pairs = []
-    for i, pair in enumerate(pairs_as_notes):
+    for p, pair in enumerate(pairs_as_notes):
         pair_dict = {}
         for f in [1, 2]:
             pair_dict[f"f{f}"] = librosa.note_to_hz(pair[f - 1])
-            pair_dict["PAIR"] = f"Herring{i}"
+            pair_dict["PAIR"] = f"Herring{p}"
             for i, h in enumerate(h_set):
                 pair_dict[f"f{f} h{i + 1}"] = h
         pairs.append(pair_dict)
@@ -267,3 +267,6 @@ def pilot_results_formula():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.ERROR)
     pilot_results_formula()
+    create_herrings(phon_levels=[10, 30, 50],
+                    h_set=[2, 3, 4],
+                    clear_dir=False)
