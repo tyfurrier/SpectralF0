@@ -8,6 +8,7 @@ import os
 from typing import Tuple, List, TypedDict
 from src.custom_errors import ClippingError
 import pandas as pd
+from enums import FScale
 import logging
 
 
@@ -24,6 +25,124 @@ PairDict = TypedDict(
         "f2 h2": int,
         "f2 h3": int,}
 )
+
+class Frequency(float):
+    """ A utility container that represents a frequency in various scales"""
+
+    def __new__(self, value, mode):
+        return float.__new__(self, value)
+
+    def __init__(self, value: float, mode: FScale = FScale.HZ):
+        float.__init__(value)
+        self.mode: FScale = FScale.HZ
+
+    def in_mel(self):
+        new_value = self.mode.to_mel(value=self)
+        return Frequency(value=new_value, mode=FScale.MEL)
+
+    def in_midi(self):
+        new_value = self.mode.to_midi(value=self)
+        return Frequency(value=new_value, mode=FScale.MIDI)
+
+    def in_hz(self):
+        new_value = self.mode.to_hz(value=self)
+        return Frequency(value=new_value, mode=FScale.HZ)
+
+    def _in_fscale(self, new_scale: FScale):
+        if new_scale == FScale.MEL:
+            return self.in_mel()
+        elif new_scale == FScale.HZ:
+            return self.in_hz()
+        elif new_scale == FScale.MIDI:
+            return self.in_midi()
+
+
+class TonePairPart():
+    """ Represents one tone out of two that both contain three partials"""
+    def __init__(self, f: float, h1: int, h2: int, h3: int):
+        self.f: Frequency = Frequency(value=f, mode=FScale.HZ)
+        self.harmonics = [h1, h2, h3]
+    @property
+    def h1(self) -> int:
+        return self.harmonics[0]
+    @property
+    def h2(self) -> int:
+        return self.harmonics[1]
+
+    @property
+    def h3(self) -> int:
+        return self.harmonics[2]
+
+    @property
+    def h1_freq(self) -> Frequency:
+        return Frequency(value=self.h1 * self.f,
+                         mode=FScale.HZ)
+
+    @property
+    def h2_freq(self) -> Frequency:
+        return Frequency(value=self.h2 * self.f,
+                         mode=FScale.HZ)
+
+    @property
+    def h3_freq(self) -> Frequency:
+        return Frequency(value=self.h3 * self.f,
+                         mode=FScale.HZ)
+
+    def spectroid(self, fscale: FScale = FScale.HZ) -> Frequency:
+        average = sum(f._in_fscale(new_scale=fscale) for f in [self.h1_freq,
+                                                               self.h2_freq,
+                                                               self.h3_freq]) / 3
+        return Frequency(value=average, mode=fscale)
+
+
+class TonePair():
+    """ Represents a pair of tones which each consist of three frequencies of equal perceived
+    loudness. The fundamental is assumed to not be sounded."""
+    def __init__(self,
+                 pair_dict: PairDict):
+        self.row: PairDict = pair_dict
+        self.first: TonePairPart = TonePairPart(f=self.row['f1'],
+                                  h1=self.row['f1 h1'],
+                                  h2=self.row['f1 h2'],
+                                  h3=self.row['f1 h3'])
+
+        self.second: TonePairPart = TonePairPart(f=self.row['f2'],
+                                  h1=self.row['f2 h1'],
+                                  h2=self.row['f2 h2'],
+                                  h3=self.row['f2 h3'])
+
+    @property
+    def pair_number(self):
+        return int(self.row["PAIR"])
+
+    @property
+    def spectroid_shift(self) -> Frequency:
+        for scale in FScale:
+            first_spectroid = self.first.spectroid(fscale=scale)
+            print(f'{first_spectroid} first in {scale.value}')
+            second_spectroid = self.second.spectroid(fscale=scale)
+            print(f'{second_spectroid} second in {scale.value}')
+            print(f'spectroid shift calculated through {scale.value}: {Frequency(value=(first_spectroid - second_spectroid),mode=scale).in_mel()}')
+        return first_spectroid.in_hz() - second_spectroid
+
+def get_tone_pair_list(only_used: bool = False) -> List[TonePair]:
+    """ Returns a list that contains the rows of the spreadsheet of all our potential
+    tone pair configurations. The column names are detailed in the PairDict TypedDict definition.
+     If `only_used` is set to True, then only the pairs used in our
+    experiment are returned: [1, 2, 3, 4, 6, 8, 22, 23, 24, 26]"""
+    all_pairs: pd.DataFrame = pd.read_csv(os.path.join(os.path.dirname(__file__), "all_pairs.csv"))
+    ret_list: List[PairDict] = []
+    pair_filter = None
+    if only_used:
+        pair_filter = {1, 2, 3, 4, 6, 8, 22, 23, 24, 26}
+    for i, row in all_pairs.iterrows():
+        pair_number = int(row["PAIR"])
+        if pair_number not in pair_filter or pair_filter is None:
+            continue
+        ret_list.append(TonePair(pair_dict=row))
+    return ret_list
+
+
 
 def pure_tone_synthesizer(fundamental: int,
                           harmonic_decibels: list = None,
@@ -211,37 +330,22 @@ def create_herrings(phon_levels: List[float] = None,
                           sr=sr,
                           overwrite=True)
 
-def annotate_tone_pairs(phon_levels: list = None):
-
+def annotate_tone_pairs():
+    """ Top Pitch (Hz), top Pitch (harmonic #), MAD (mel scale), spectroid shift (mel)"""
     # read all_pairs.csv into a pandas dataframe
     tone_pair_csv: pd.DataFrame = pd.read_csv("all_pairs.csv")
     output_folder_path = _created_samples_folder_path()  # we will write a new one where we keep sounds
     for i, row in tone_pair_csv.iterrows():
-        for part in ["f1", "f2"]:
-                # add column for mel, hz, and midi spectroid for each part
-                # add column for spectroid shift in mel, hz, and midi
-                # add column for spectroid shift when only considering harmonics
-                # add column for min and max inter-harmonic distance
-                # add column for fundamental distance in mel, hz, and midi
-                # add column for common frequency
-                # add column for distance from fundamental to common frequency in each scale mel hz midi
-                # add column for distance from fundamental to harmonics in each scale mel hz midi
-                max_harmonic = int(row[f"{part} h3"])
-                max_harmonic = int(row[f"{part} h3"])
-                decibel_list = [None for _ in range(max_harmonic)]
-                phon = 1
-                decibel_list[0] = lc.db_from_phon(f=row[part],
-                                                  phon=phon)
-                logging.info(
-                    f'Creating pair {row["PAIR"]} at {decibel_list[0]} for {phon} phon at {row[part]}')
-                for h in ["h1", "h2", "h3"]:
-                    harmonic = int(row[f"{part} {h}"])
-                    hz_of_harmonic = row[part] * harmonic
-                    decibel_list[harmonic - 1] = lc.db_from_phon(f=hz_of_harmonic,
-                                                                 phon=phon)
-                    logging.info(f'{row["PAIR"]} PAIR: \n'
-                                 f'{harmonic}th harmonic at {decibel_list[harmonic - 1]} dB for '
-                                 f'{phon} phon at {row[part] * harmonic}')
+        tone_pair: TonePair = TonePair(pair_dict=row)
+        print(tone_pair.spectroid_shift)
+            # add column for mel, hz, and midi spectroid for each part
+            # add column for spectroid shift in mel, hz, and midi
+            # add column for spectroid shift when only considering harmonics
+            # add column for min and max inter-harmonic distance
+            # add column for fundamental distance in mel, hz, and midi
+            # add column for common frequency
+            # add column for distance from fundamental to common frequency in each scale mel hz midi
+            # add column for distance from fundamental to harmonics in each scale mel hz midi
 
 
 def pilot_results_formula():
@@ -266,7 +370,8 @@ def pilot_results_formula():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.ERROR)
-    pilot_results_formula()
-    create_herrings(phon_levels=[10, 30, 50],
-                    h_set=[2, 3, 4],
-                    clear_dir=False)
+    # pilot_results_formula()
+    # create_herrings(phon_levels=[10, 30, 50],
+    #                 h_set=[2, 3, 4],
+    #                 clear_dir=False)
+    annotate_tone_pairs()

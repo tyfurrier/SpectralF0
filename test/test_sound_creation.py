@@ -6,7 +6,8 @@ import numpy as np
 def test_scaling_consistency():
     full_wave, sr = librosa.load(os.path.join("../created_samples", "trumpet_pure_440.wav"))
     oct_wave, sr = librosa.load(os.path.join("../created_samples", "trumpet_pure_octave_440.wav"))
-    oct_complement_wave, sr = librosa.load(os.path.join("../created_samples", "trumpet_pure_missing_octave_440.wav"))
+    oct_complement_wave, sr = librosa.load(os.path.join("../created_samples",
+                                                        "trumpet_pure_missing_octave_440.wav"))
     check_min_max = lambda x, m: print(f"{m} Min: {np.min(x)}, {m} Max: {np.max(x)}")
     reconstructed_wave = oct_wave + oct_complement_wave
     check_min_max(full_wave, "Full")
