@@ -89,6 +89,7 @@ class TonePairPart():
                          mode=FScale.HZ)
 
     def spectroid(self, fscale: FScale = FScale.HZ) -> Frequency:
+        """ The spectral centroid"""
         average = sum(f._in_fscale(new_scale=fscale) for f in [self.h1_freq,
                                                                self.h2_freq,
                                                                self.h3_freq]) / 3
@@ -115,15 +116,21 @@ class TonePair():
     def pair_number(self):
         return int(self.row["PAIR"])
 
-    @property
-    def spectroid_shift(self) -> Frequency:
-        for scale in FScale:
-            first_spectroid = self.first.spectroid(fscale=scale)
-            print(f'{first_spectroid} first in {scale.value}')
-            second_spectroid = self.second.spectroid(fscale=scale)
-            print(f'{second_spectroid} second in {scale.value}')
-            print(f'spectroid shift calculated through {scale.value}: {Frequency(value=(first_spectroid - second_spectroid),mode=scale).in_mel()}')
-        return first_spectroid.in_hz() - second_spectroid
+    def spectroid_shift(self, scale: FScale = FScale.MEL) -> Frequency:
+        # for scale in FScale:
+        #     first_spectroid = self.first.spectroid(fscale=scale)
+        #     print(f'{first_spectroid} first in {scale.value}')
+        #     second_spectroid = self.second.spectroid(fscale=scale)
+        #     print(f'{second_spectroid} second in {scale.value}')
+        #     print(f'spectroid shift calculated through {scale.value}: {Frequency(value=(first_spectroid - second_spectroid),mode=scale).in_mel()}')
+        first_spectroid = self.first.spectroid(fscale=scale)
+        second_spectroid = self.second.spectroid(fscale=scale)
+        return second_spectroid - first_spectroid
+
+    def virtual_shift(self, scale: FScale = FScale.MIDI):
+        first = self.first.f.in_midi()
+        second = self.second.f.in_midi()
+        return second - first
 
 def get_tone_pair_list(only_used: bool = False) -> List[TonePair]:
     """ Returns a list that contains the rows of the spreadsheet of all our potential
@@ -331,21 +338,74 @@ def create_herrings(phon_levels: List[float] = None,
                           overwrite=True)
 
 def annotate_tone_pairs():
-    """ Top Pitch (Hz), top Pitch (harmonic #), MAD (mel scale), spectroid shift (mel)"""
+    """ Top Pitch (Hz), top Pitch (harmonic #), MAD (max adjacent distance) (mel scale),
+    spectroid shift (mel)"""
     # read all_pairs.csv into a pandas dataframe
     tone_pair_csv: pd.DataFrame = pd.read_csv("all_pairs.csv")
+    tone_pair_annotated = tone_pair_csv.copy()
+    tone_pair_annotated["spectroid_shift"] = np.nan
+    tone_pair_annotated["virtual_shift"] = np.nan
+    tone_pair_annotated["top_pitch_hz"] = np.nan
+    tone_pair_annotated["top_pitch_harmonic"] = np.nan
+    tone_pair_annotated["top_pitch_mel"] = np.nan
+    tone_pair_annotated["top_pitch_distance_mel"] = np.nan
+    tone_pair_annotated["min_ihd"] = np.nan
+    tone_pair_annotated["max_ihd"] = np.nan
+    tone_pair_annotated["min_ahd"] = np.nan
+    tone_pair_annotated["max_ahd"] = np.nan
+
     output_folder_path = _created_samples_folder_path()  # we will write a new one where we keep sounds
-    for i, row in tone_pair_csv.iterrows():
+    for index, row in tone_pair_annotated.iterrows():
         tone_pair: TonePair = TonePair(pair_dict=row)
-        print(tone_pair.spectroid_shift)
-            # add column for mel, hz, and midi spectroid for each part
-            # add column for spectroid shift in mel, hz, and midi
-            # add column for spectroid shift when only considering harmonics
-            # add column for min and max inter-harmonic distance
-            # add column for fundamental distance in mel, hz, and midi
-            # add column for common frequency
-            # add column for distance from fundamental to common frequency in each scale mel hz midi
-            # add column for distance from fundamental to harmonics in each scale mel hz midi
+
+        # add column for virtual shift in midi
+        row["virtual_shift"] = tone_pair.virtual_shift(scale=FScale.MIDI)
+        # add column for spectroid shift in mel, hz, and midi
+        row["spectroid_shift"] = tone_pair.spectroid_shift(scale=FScale.MIDI)
+
+        # add column for common frequency
+        row["top_pitch_hz"] = tone_pair.first.h3_freq.in_hz()
+        row["top_pitch_mel"] = tone_pair.first.h3_freq.in_mel()
+
+        # add column for distance from fundamental to common frequency in each scale mel hz midi
+        row["top_pitch_harmonic"] = tone_pair.first.h3
+        row["top_pitch_distance_mel"] = tone_pair.first.h3_freq.in_mel() - tone_pair.first.f.in_mel()
+        mel_inter_distances = []
+        mel_adjacent_distances = []
+        mel_frequencies_1 = [Frequency(value=tone_pair.first.f * h, mode=FScale.HZ).in_midi()
+                             for h in tone_pair.first.harmonics]
+        mel_frequencies_2 = [Frequency(value=tone_pair.second.f * h, mode=FScale.HZ).in_midi()
+                             for h in tone_pair.second.harmonics]
+        for i, tone_one_partial in enumerate(mel_frequencies_1):
+            same_index_distance = mel_frequencies_2[i] - tone_one_partial if i < 2 else None
+            above_index_distance = mel_frequencies_2[i + 1] - tone_one_partial if i < 2 else None
+            below_index_distance = mel_frequencies_2[i - 1] - tone_one_partial if i > 0 else None
+            if same_index_distance is not None and round(same_index_distance, 1) == 0 \
+                or  above_index_distance is not None and round(above_index_distance, 1) == 0 \
+                or below_index_distance is not None and round(below_index_distance, 1) == 0:
+                print('breakpoint')
+            if i != len(mel_frequencies_1) - 1:  # not top harmonic
+                mel_adjacent_distances.append(mel_frequencies_2[i] - tone_one_partial)  # same index
+                if mel_frequencies_2[i + 1] < mel_frequencies_1[i + 1]:
+                    mel_adjacent_distances.append(mel_frequencies_2[i + 1] - tone_one_partial)  # above
+            if i != 0 and mel_frequencies_2[i - 1] > mel_frequencies_1[i - 1]:
+                mel_adjacent_distances.append(mel_frequencies_2[i - 1] - tone_one_partial)
+            for ind_of_two_partial, tone_two_partial in enumerate(mel_frequencies_2):
+                if ind_of_two_partial == 2 and i == 2:
+                    continue  # skip comparing top frequency to top
+                movement = tone_two_partial - tone_one_partial
+                if movement != 0:
+                    mel_inter_distances.append(movement)
+        # add column for min and max inter-harmonic distance
+        abs_inters = [abs(x) for x in mel_inter_distances if x != 0]
+        row["min_ihd"] = min(abs_inters)
+        row["max_ihd"] = max(abs_inters)
+        # add column for min and max inter-harmonic distance
+        abs_adjacents = [abs(x) for x in mel_adjacent_distances if x != 0]
+        row["min_ahd"] = min(abs_adjacents)
+        row["max_ahd"] = max(abs_adjacents)
+        tone_pair_annotated.loc[index] = row
+    tone_pair_annotated.to_csv(os.path.join(output_folder_path, "pair_annotations.csv"))
 
 
 def pilot_results_formula():

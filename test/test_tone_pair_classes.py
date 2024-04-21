@@ -22,4 +22,7 @@ def test_all_tones_direction(full_thirty_tone_pairs):
 
 def test_spectroid(first_pair):
     assert first_pair.second.spectroid(fscale=FScale.HZ) == 500
-    assert first_pair.second.spectroid(fscale=FScale.MEL) == FScale.HZ.to_mel(value=500)
+    assert first_pair.first.spectroid(fscale=FScale.HZ) == 450
+    assert first_pair.spectroid_shift(scale=FScale.MIDI) == 3
+    assert FScale.HZ.to_midi(value=1000) == 1000
+    # assert first_pair.second.spectroid(fscale=FScale.MEL) == FScale.HZ.to_mel(value=500)
